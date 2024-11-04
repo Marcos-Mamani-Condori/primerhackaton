@@ -1,64 +1,94 @@
-// pages/api/auth/[...nextauth].js
 import NextAuth from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
-import prisma from "../../../lib/prisma"; 
-import bcrypt from "bcrypt";
+import db from "@/libs/db"; // Asegúrate de que la ruta a tu instancia de Prisma sea correcta
+import bcrypt from 'bcrypt';
+import jwt from 'jsonwebtoken'; // Asegúrate de tenerlo instalado con npm o yarn
 
-export default NextAuth({
+const authOptions = {
   providers: [
     CredentialsProvider({
-      name: "Credentials",
+      name: "credentials",
       credentials: {
-        username: { label: "Nombre de usuario", type: "text", placeholder: "Nombre de usuario" },
-        password: { label: "Contraseña", type: "password" },
+        name: { label: "text", type: "text", placeholder: "nombre" },
+        password: { label: "password", type: "password" },
       },
-      async authorize(credentials) {
-        const { username, password } = credentials;
-
-        // Verificar si el usuario existe en la base de datos
-        const user = await prisma.user.findUnique({
-          where: { username },
-        });
-
-        if (!user) {
-          throw new Error("Nombre de usuario no encontrado");
+      async authorize(credentials, req) {
+        // Validación de las credenciales
+        if (!credentials.name || !credentials.password) {
+          throw new Error("Nombre y contraseña son obligatorios.");
         }
 
-        // Comparar la contraseña ingresada con la contraseña encriptada en la base de datos
-        const isValidPassword = await bcrypt.compare(password, user.password);
-        if (!isValidPassword) {
+        // Buscar usuario en la base de datos
+        const userFound = await db.user.findUnique({ // Cambia 'users' a 'user' para coincidir con tu modelo
+          where: { name: credentials.name },
+        });
+        console.log("User Found:", userFound);
+        
+        // Si no se encuentra el usuario, lanza un error
+        if (!userFound) {
+          throw new Error("Nombre no encontrado");
+        }
+
+        // Verificar la contraseña
+        const matchPassword = await bcrypt.compare(credentials.password, userFound.password);
+        if (!matchPassword) {
           throw new Error("Contraseña incorrecta");
         }
 
-        // Si la autenticación es exitosa, retornar el objeto de usuario
-        return { id: user.id, username: user.username };
+        // Generar un token JWT
+        const accessToken = jwt.sign(
+          { id: userFound.id, name: userFound.name },
+          process.env.NEXTAUTH_SECRET,
+          { expiresIn: '1w' } // El token expira en 1 semana
+        );
+
+        // Retorna solo los datos esenciales del usuario, incluyendo el token
+        return {
+          id: userFound.id,
+          name: userFound.name,
+          accessToken, // Agrega el token aquí
+        };
       },
     }),
   ],
+
+  // Configuración de sesión
   session: {
-    jwt: true, // Se utiliza JWT para la sesión
-    maxAge: 7 * 24 * 60 * 60, // 1 semana
+    strategy: "jwt",  // Utiliza JWT en lugar de cookies de sesión
   },
+
+  // Configuración de JWT
   jwt: {
-    secret: process.env.NEXTAUTH_SECRET, // Se usa el secreto del entorno para firmar el token
+    secret: process.env.NEXTAUTH_SECRET, // Secreto para firmar el token
+    maxAge: 60 * 60 * 24 * 7, // Duración del token (1 semana)
   },
-  pages: {
-    signIn: '/auth/signin', // Ruta personalizada para la página de inicio de sesión
-  },
+
+  // Callbacks para personalizar el token y la sesión
   callbacks: {
     async jwt({ token, user }) {
+      // Agrega información del usuario y el token al JWT
       if (user) {
+        token.accessToken = user.accessToken; // Almacena el token en el JWT
         token.id = user.id;
-        token.username = user.username; // Agregar el nombre de usuario al token
       }
       return token;
     },
+
     async session({ session, token }) {
-      if (token) {
-        session.user.id = token.id;
-        session.user.username = token.username; // Agregar el nombre de usuario a la sesión
-      }
+      // Agrega el ID y el token de acceso a la sesión
+      session.user.id = token.id;
+      session.user.accessToken = token.accessToken; // Agrega el token a la sesión
       return session;
     },
   },
-});
+
+  // Páginas personalizadas
+  pages: {
+    signIn: "/auth/login", // Ruta de la página de inicio de sesión
+  },
+
+  secret: process.env.NEXTAUTH_SECRET, // Asegúrate de que la variable de entorno esté definida
+};
+
+const handler = NextAuth(authOptions);
+export { handler as GET, handler as POST };
