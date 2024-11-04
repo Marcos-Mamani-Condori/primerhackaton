@@ -1,52 +1,53 @@
-// pages/api/register.js
-import prisma from '../../lib/prisma';
-import bcrypt from 'bcrypt';
-import jwt from 'jsonwebtoken';
-
-export default async function handler(req, res) {
-  if (req.method === 'POST') {
-    const { username, password } = req.body;
-
-    // Validar que se proporcionen ambos campos
-    if (!username || !password) {
-      return res.status(400).json({ message: 'Nombre de usuario y contraseña son requeridos.' });
-    }
-
+import { NextResponse } from 'next/server'
+import db from '@/libs/db'
+import bcrypt from 'bcrypt'
+export async function POST(request) {
     try {
-      // Verificar si el nombre de usuario ya existe
-      const existingUser = await prisma.user.findUnique({
-        where: { username },
-      });
+        const data = await request.json();
 
-      if (existingUser) {
-        return res.status(400).json({ message: 'El nombre de usuario ya existe' });
-      }
-
-      // Encriptar la contraseña
-      const hashedPassword = await bcrypt.hash(password, 10);
-
-      // Crear un nuevo usuario
-      const newUser = await prisma.user.create({
-        data: {
-          username,
-          password: hashedPassword,
-        },
-      });
-
-      // Crear un token JWT con expiración de una semana
-      const token = jwt.sign(
-        { id: newUser.id, username: newUser.username },
-        process.env.JWT_SECRET, // Asegúrate de tener esta variable de entorno configurada
-        { expiresIn: '7d' } // Token expira en 7 días
-      );
-
-      return res.status(201).json({ message: 'Usuario creado con éxito', token });
-    } catch (error) {
-      console.error(error);
-      return res.status(500).json({ message: 'Error interno del servidor' });
+    const userFound = await db.users.findUnique({
+        where: { 
+            email: data.email
+        }
+    })
+    if (userFound){
+        return NextResponse.json({
+            message: "email already exists "
+        }, {
+            status: 400
+        })
     }
-  }
-
-  // Manejo de métodos no permitidos
-  return res.status(405).json({ message: 'Método no permitido' });
+    const usernameFound = await db.users.findUnique({
+        where: { 
+            name: data.name
+        }
+    })
+    if (usernameFound){
+        return NextResponse.json({
+            message: "username already exists "
+        }, {
+            status: 400
+        })
+    }
+const hashedPassword = await bcrypt.hash(data.password, 10 )
+const newUser = await db.users.create({
+        data: {
+            password: hashedPassword,
+            name: data.name,
+        }
+    }
+)
+const {password: _, ...users}=newUser
+console.log("users:", JSON.stringify(users, null, 2)); 
+     return NextResponse.json(users);
+    } catch (error) {
+        return NextResponse.json(
+            {
+            message: error.message,
+        },
+        {
+            status: 500,
+        }
+    );
+    }
 }
