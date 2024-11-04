@@ -1,9 +1,9 @@
 import React from 'react'
-
-function HOMRE() {
+import Login from './Login/page'
+const App=()=> {
   return (
-    <div>HOMRE</div>
+    <Login/>
   )
 }
 
-export default HOMRE
+export default App
